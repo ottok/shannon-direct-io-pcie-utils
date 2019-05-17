@@ -1,0 +1,359 @@
+#!/bin/bash
+f_set_sys_path() {
+	local add_path=/bin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/root/bin
+	if [[ -z $PATH ]]; then
+		PATH=$add_path
+	else
+		PATH=$PATH:$add_path
+	fi
+}
+
+f_check_uid() {
+	if [ $UID -ne 0 ]; then
+		echo "run this script in root user!!!"
+		exit -1
+	fi
+}
+
+f_show_script_arg_help() {
+	echo "usage: shannon-irqbind [options]"
+	echo "options:"
+	echo -e "\tno arg, start bind irq to cpus."
+	echo -e "\t-h, show help(this menu)."
+	echo -e "\t-v, view bind status."
+	echo -e "\t-f devname, specify device name(like xxx will find to /dev/xxx do bind)."
+}
+
+f_bc_trim_line70() {
+	local str=$1
+	local find_slash=$(echo $zgh | bc | grep "\\\\" -bo)
+	if [ -z $find_slash ]; then
+		echo $str
+		return 0
+	fi
+	local slash_pos=$(echo "$find_slash" | awk -F: '{if (NR == 1) {print $1}}')
+	local line_length=$((slash_pos + 2))
+	local origin_len=${#str}
+	local line=
+	local ret=
+	if (($origin_len > $line_length)); then
+		line=$(((origin_len + line_length - 1) / line_length))
+		for ((li = 0, st = 0, ed = st + $slash_pos; li < line; ++li, st = st + $line_length, ed = ed + $line_length)); do
+			if ((li == line - 1)); then
+				ed=$origin_len
+			fi
+			ret=${ret}${str:$st:$((ed - st))}
+		done
+	else
+		ret=$str
+	fi
+	echo "$ret"
+}
+
+f_10bit_to_16bit() {
+	local ret=$(bc <<eof
+	obase = 16;
+	$1;
+eof
+	)
+	ret=$(f_bc_trim_line70 "$ret")
+	echo $ret
+}
+
+f_10bit_to_2bit() {
+	local ret=$(bc <<eof
+	obase = 2;
+	$1;
+eof
+	)
+	ret=$(f_bc_trim_line70 "$ret")
+	echo $ret
+}
+
+f_16bit_to_10bit() {
+	local ret=$(bc <<eof
+	ibase = 16;
+	$1;
+eof
+	)
+	ret=$(f_bc_trim_line70 "$ret")
+	echo $ret
+}
+
+f_pow_2() {
+	local ret=$(bc <<eof
+	2 ^ $1;
+eof
+	)
+	ret=$(f_bc_trim_line70 "$ret")
+	echo $ret
+}
+
+f_pow_2_show_16bit() {
+	local p2=$(f_pow_2 $1)
+	p2=$(f_bc_trim_line70 "$p2")
+	echo $(f_10bit_to_16bit $p2)
+}
+
+f_16bit_divide_2bit() {
+	local origin=$(f_16bit_to_10bit $1)
+	origin=$(f_bc_trim_line70 "$origin")
+	local bits=$2
+	local prefix=
+	local ret=$(f_10bit_to_2bit $origin)
+	local len=${#ret}
+	if ((len < bits)); then
+		for ((i = len; i < bits; ++i)); do
+			prefix=${prefix}0
+		done
+		ret=${prefix}${ret}
+	fi
+	echo $ret
+}
+
+f_2bit_string_to_arr() {
+	local str=$1
+	local ret=
+	for ((i = 0; i < ${#str}; ++i)); do
+		if ((i)); then
+			ret=$ret" "
+		fi
+		ret=$ret${str:$i:1}
+	done
+	echo $ret
+}
+
+f_to_upper_case() {
+	local str=$1
+	local ret=$(echo $str | sed 'y/abcdef/ABCDEF/')
+	echo $ret
+}
+
+f_smp_affinity_to_16bit() {
+	local str=$1
+	str=$(echo $str | sed 's/,//g')
+	str=$(f_to_upper_case $str)
+	echo $str
+}
+
+f_16bit_to_smp_affinity() {
+	local str=$1
+	local len=${#str}
+	local prefix=
+	if ((len % 8)); then
+		for ((i = 1; i <= (len + 7) / 8 * 8 - len; ++i)); do
+			prefix=${prefix}0
+		done
+	fi
+	str=$prefix$str
+	len=$(((len + 7) / 8 * 8))
+	local first=1
+	local ret=
+	for ((st = 0; st < $len; st = st + 8)); do
+		if [ $first -eq 1 ]; then
+			first=0
+		else
+			ret=${ret},
+		fi
+		ret=${ret}${str:st:8}
+	done
+	ret=$(f_to_upper_case $ret)
+	str=$(f_to_upper_case $str)
+	echo $ret $str
+}
+
+pci_addr_arr=
+f_get_driver_pci_addr() {
+	local driver_name=$1
+	local ret=$(lspci -vv |
+	awk -v drv=$driver_name '
+	BEGIN {
+		RS = "\n\n"
+		ORS = "\n\n"
+	}
+	$0~"Kernel driver in use: "drv{
+		print $0
+	}
+	' |
+	grep -i "mass storage controller" $pci_file2 |
+	awk '{print $1}')
+		echo $ret
+	}
+
+args=
+arg_run=1
+arg_dev_name=
+arg_show_help=0
+arg_show_status=0
+args=$(getopt -qu f:hv "$@")
+set -- $args
+while [ -n "$1" ]; do
+	case $1 in
+		-h)
+			arg_show_help=1
+			;;
+		-v)
+			arg_show_status=1
+			;;
+		-f)
+			shift
+			arg_dev_name=$1
+			;;
+		--)
+			break
+			;;
+		*)
+			f_show_script_arg_help
+			;;
+	esac
+	shift
+done
+
+if ((arg_show_help)); then
+	f_show_script_arg_help
+	exit 0
+fi
+if ((arg_show_status)); then
+	arg_run=0
+fi
+
+f_set_sys_path
+f_check_uid
+
+driver_name="shannon"
+pci_addr_arr=$(f_get_driver_pci_addr $driver_name)
+
+cpu_i=0
+cpu_global_arr=($(cat /proc/cpuinfo |
+	grep processor |
+	awk -F: '{print $2}' |
+	awk '{print $1}'))
+cpu_global_cnt=${#cpu_global_arr[*]}
+cpu_numa_arr=
+cpu_bind_arr=()
+cpu_bind_status=()
+
+card_id=
+card_name=
+irq_i=
+irq_arr=
+numa_node=
+pci_sys_dir="/sys/bus/pci/devices/0000:"
+pre_check=
+have_irq_balance=
+cpu_all_cnt=
+tmp_cnt=
+declare -A numa_occ
+declare -A last_i
+if ((arg_show_status)); then
+	echo "flash card bind status:"
+fi
+for card_id in $pci_addr_arr; do
+	card_name=$(cat $pci_sys_dir$card_id/name | sed 's/shannon-//')
+	irq_arr=($(ls $pci_sys_dir$card_id/msi_irqs))
+	numa_node=$(cat $pci_sys_dir$card_id/numa_node)
+	if ((numa_node != -1)); then
+		cpu_numa_arr=($(ls /sys/bus/node/devices/node$numa_node |
+			grep -E "cpu[0-9]+" |
+			sed 's/cpu//' |
+			sort -n))
+	fi
+
+	if ((arg_run)); then
+		if [ -z ${numa_occ["$numa_node"]} ]; then
+			numa_occ["$numa_node"]=1
+			last_i["$numa_node"]=0
+		fi
+
+		cpu_all_cnt=0
+		for cpu_i in ${cpu_global_arr[*]}; do
+			cpu_bind_arr[$cpu_i]=0
+		done
+		for irq_i in ${irq_arr[*]}; do
+			for ((i = 0; i < $cpu_global_cnt; ++i)); do
+				tmp_cnt=$(cat /proc/interrupts |
+					grep $driver_name |
+					awk -v num=$irq_i -v cpuid=$i '{if ($1 == num":") print $(cpuid + 2)}')
+				((cpu_bind_arr[$i] += $tmp_cnt))
+				((cpu_all_cnt += $tmp_cnt))
+			done
+		done
+		pre_check=1
+		have_irq_balance=$(ps aux |
+			grep irqbalance |
+			awk -v find=0 '$0!~"grep"{find = 1;} END{print find;}')
+		if [[ -z $arg_dev_name || $have_irq_balance == "0" ]]; then
+			for cpu_i in ${cpu_global_arr[*]}; do
+				if ((cpu_bind_arr[$cpu_i] * 2 >= cpu_all_cnt)); then
+					pre_check=0
+				fi
+			done
+		else
+			pre_check=1
+		fi
+
+		if [ $numa_node -ne -1 ]; then
+			tmp_i=${last_i["$numa_node"]}
+			for i in ${!irq_arr[*]}; do
+				if [ $pre_check -ne 1 ] &&
+					(
+						[[ -z $arg_dev_name ]] ||
+						[[ -n $arg_dev_name && $arg_dev_name == $card_name ]]
+					); then
+					cpu_i=${cpu_numa_arr[$tmp_i]}
+					irq_i=${irq_arr[$i]}
+					cpu_bind_status=$(f_pow_2_show_16bit $cpu_i)
+					cpu_bind_status=($(f_16bit_to_smp_affinity $cpu_bind_status $cpu_global_cnt))
+					echo "$cpu_bind_status" > /proc/irq/$irq_i/smp_affinity
+				fi
+				tmp_i=$(((tmp_i + 1) % ${#cpu_numa_arr[*]}))
+			done
+			last_i["$numa_node"]=$tmp_i
+		else
+			tmp_i=${last_i["$numa_node"]}
+			for i in ${!irq_arr[*]}; do
+				if [ $pre_check -ne 1 ] &&
+					(
+						[[ -z $arg_dev_name ]] ||
+						[[ -n $arg_dev_name && $arg_dev_name == $card_name ]]
+					); then
+					cpu_i=${cpu_global_arr[$tmp_i]}
+					irq_i=${irq_arr[$i]}
+					cpu_bind_status=$(f_pow_2_show_16bit $cpu_i)
+					cpu_bind_status=($(f_16bit_to_smp_affinity $cpu_bind_status $cpu_global_cnt))
+					echo "$cpu_bind_status" > /proc/irq/$irq_i/smp_affinity
+				fi
+				tmp_i=$(((tmp_i + 1) % ${#cpu_global_arr[*]}))
+			done
+			last_i["$numa_node"]=$tmp_i
+		fi
+	fi
+
+	if ((arg_show_status)); then
+		echo "----------------------------------------"
+		echo "flash card: $card_name"
+		echo "pci addr: $card_id"
+		echo "at numa node $numa_node"
+		if ((numa_node == -1)); then
+			echo "relative cpu is: ${cpu_global_arr[*]}"
+		else
+			echo "relative cpu is: ${cpu_numa_arr[*]}"
+		fi
+		for i in ${!irq_arr[*]}; do
+			irq_i=${irq_arr[$i]}
+			cpu_i=$(cat /proc/irq/$irq_i/smp_affinity)
+			cpu_bind_status=($(f_smp_affinity_to_16bit $cpu_i))
+			cpu_bind_status=$(f_16bit_divide_2bit $cpu_bind_status $cpu_global_cnt)
+			cpu_bind_status=($(f_2bit_string_to_arr $cpu_bind_status))
+			echo -en "irq $i id as $irq_i bind in cpu(s):"
+			for cpu_i in ${!cpu_bind_status[*]}; do
+				if ((cpu_bind_status[$cpu_i])); then
+					echo -en " $((cpu_global_cnt - 1 - cpu_i))"
+				fi
+			done
+			echo -en "\n"
+		done
+	fi
+done
+
+exit 0

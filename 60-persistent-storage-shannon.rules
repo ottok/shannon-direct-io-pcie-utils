@@ -1,0 +1,14 @@
+# udev rules for Shannon Direct-IO PCIe Flash cards
+# Shannon Systems, 2013
+
+ACTION!="add|change", GOTO="persistent_storage_shannon_end"
+
+KERNEL=="df*[!0-9]", PROGRAM="/bin/cat /sys/block/%k/shannon/serial_number", ENV{ID_SERIAL}="shannon-%c", SYMLINK+="disk/by-id/pcie-$env{ID_SERIAL}"
+KERNEL=="df*[0-9]", PROGRAM="/bin/cat /sys/block/%P/shannon/serial_number", ENV{ID_SERIAL}="shannon-%c", SYMLINK+="disk/by-id/pcie-$env{ID_SERIAL}-part%n"
+KERNEL=="df*[!0-9]", PROGRAM="/usr/bin/shannon-irqbind -f %k"
+
+# This is for direct-IO pool
+KERNEL=="p*vol*", SUBSYSTEM=="block", PROGRAM="/bin/cat /sys/class/block/%k/shannon/user_defined_name", SYMLINK+="%c"
+KERNEL=="p*vol*", PROGRAM="/usr/bin/shannon-irqbind"
+
+LABEL="persistent_storage_shannon_end"
