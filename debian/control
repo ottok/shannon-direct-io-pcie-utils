@@ -1,5 +1,5 @@
 Source: shannon-utils
-Section: non-free
+Section: utils
 Priority: optional
 Maintainer: Yan Gao <gaoyan@shannon-data.com>
 Build-Depends: debhelper (>= 7),
