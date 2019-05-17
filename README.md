@@ -26,3 +26,11 @@ exit
 
 # Ensure any files written by Docker are again user owned
 sudo chown -R $USER ../
+
+# Upload to Launchpad PPA
+COMMIT_ID="$(git log -n 1 --oneline | cut -d ' ' -f 1)"
+PPA=ppa:otto/shannon-direct-io-pcie
+cd ..
+backportpackage -u $PPA -d trusty -S ~`date '+%s'`.$COMMIT_ID shannon-utils_*.dsc -y
+backportpackage -u $PPA -d xenial -S ~`date '+%s'`.$COMMIT_ID shannon-utils_*.dsc -y
+backportpackage -u $PPA -d bionic -S ~`date '+%s'`.$COMMIT_ID shannon-utils_*.dsc -y
