@@ -165,20 +165,10 @@ f_16bit_to_smp_affinity() {
 pci_addr_arr=
 f_get_driver_pci_addr() {
 	local driver_name=$1
-	local ret=$(lspci -vv |
-	awk -v drv=$driver_name '
-	BEGIN {
-		RS = "\n\n"
-		ORS = "\n\n"
-	}
-	$0~"Kernel driver in use: "drv{
-		print $0
-	}
-	' |
-	grep -i "mass storage controller" $pci_file2 |
-	awk '{print $1}')
-		echo $ret
-	}
+	local ret=$(ls /sys/bus/pci/drivers/$driver_name |
+        grep -E "[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}.[0-9a-f]")
+    echo $ret
+}
 
 args=
 arg_run=1
@@ -221,7 +211,7 @@ f_set_sys_path
 f_check_uid
 
 driver_name="shannon"
-pci_addr_arr=$(f_get_driver_pci_addr $driver_name)
+pci_addr_arr=($(f_get_driver_pci_addr $driver_name))
 
 cpu_i=0
 cpu_global_arr=($(cat /proc/cpuinfo |
@@ -230,7 +220,6 @@ cpu_global_arr=($(cat /proc/cpuinfo |
 	awk '{print $1}'))
 cpu_global_cnt=${#cpu_global_arr[*]}
 cpu_numa_arr=
-cpu_bind_arr=()
 cpu_bind_status=()
 
 card_id=
@@ -238,22 +227,20 @@ card_name=
 irq_i=
 irq_arr=
 numa_node=
-pci_sys_dir="/sys/bus/pci/devices/0000:"
+pci_sys_dir="/sys/bus/pci/devices/"
 pre_check=
 have_irq_balance=
-cpu_all_cnt=
-tmp_cnt=
 declare -A numa_occ
 declare -A last_i
 if ((arg_show_status)); then
 	echo "flash card bind status:"
 fi
-for card_id in $pci_addr_arr; do
+for card_id in ${pci_addr_arr[*]}; do
 	card_name=$(cat $pci_sys_dir$card_id/name | sed 's/shannon-//')
 	irq_arr=($(ls $pci_sys_dir$card_id/msi_irqs))
 	numa_node=$(cat $pci_sys_dir$card_id/numa_node)
 	if ((numa_node != -1)); then
-		cpu_numa_arr=($(ls /sys/bus/node/devices/node$numa_node |
+		cpu_numa_arr=($(ls /sys/devices/system/node/node$numa_node |
 			grep -E "cpu[0-9]+" |
 			sed 's/cpu//' |
 			sort -n))
@@ -265,31 +252,15 @@ for card_id in $pci_addr_arr; do
 			last_i["$numa_node"]=0
 		fi
 
-		cpu_all_cnt=0
-		for cpu_i in ${cpu_global_arr[*]}; do
-			cpu_bind_arr[$cpu_i]=0
-		done
-		for irq_i in ${irq_arr[*]}; do
-			for ((i = 0; i < $cpu_global_cnt; ++i)); do
-				tmp_cnt=$(cat /proc/interrupts |
-					grep $driver_name |
-					awk -v num=$irq_i -v cpuid=$i '{if ($1 == num":") print $(cpuid + 2)}')
-				((cpu_bind_arr[$i] += $tmp_cnt))
-				((cpu_all_cnt += $tmp_cnt))
-			done
-		done
-		pre_check=1
-		have_irq_balance=$(ps aux |
-			grep irqbalance |
-			awk -v find=0 '$0!~"grep"{find = 1;} END{print find;}')
-		if [[ -z $arg_dev_name || $have_irq_balance == "0" ]]; then
-			for cpu_i in ${cpu_global_arr[*]}; do
-				if ((cpu_bind_arr[$cpu_i] * 2 >= cpu_all_cnt)); then
-					pre_check=0
-				fi
-			done
-		else
-			pre_check=1
+		pre_check=0
+		if [[ -n $arg_dev_name ]]; then
+			have_irq_balance=$(ps aux |
+				grep irqbalance |
+				awk -v find=0 '$0!~"grep"{find = 1;} END{print find;}')
+			if [[ $have_irq_balance == "1" ]]; then
+				irqbalance -o
+				pre_check=1
+			fi
 		fi
 
 		if [ $numa_node -ne -1 ]; then
