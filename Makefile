@@ -1,7 +1,11 @@
 # Vendor: Shannon Systems (Shanghai), 2012
 # Author: gaoyan@shannon-data.com
 #
-CC=gcc -m64
+CC=gcc -m64 -no-pie
+
+# NOTE! On Ubuntu Trusty's GCC version this will yield
+#  gcc: error: unrecognized command line option ‘-no-pie’
+# but that does not matter as Ubuntu Trusty is no longer supported since April 2019.
 
 TARGETS=shannon-format shannon-beacon shannon-attach shannon-detach shannon-status shannon-firmwareupdate\
 	shannon-pool shannon-cps-op

@@ -3,7 +3,7 @@ Section: utils
 Priority: optional
 Maintainer: Yan Gao <gaoyan@shannon-data.com>
 Build-Depends: debhelper (>= 9),
-               libncurses5-dev
+               lib32ncurses5-dev
 Standards-Version: 3.8.3
 Homepage: http://www.shannon-sys.com
 
