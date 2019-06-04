@@ -2,11 +2,8 @@
 
 Build:
 ```
-# Need to be one step above source folder
-cd ../
-
 # Start a Docker container for clean builds
-docker run -it -v ${PWD}/..:/build -w /build/shannon-direct-io-pcie-utils ubuntu:trusty bash
+docker run -it -v ${PWD}/..:/build -w /build/shannon-direct-io-pcie-utils ubuntu:bionic bash
 
 # Install build tools, includes mk-build-deps
 apt update && apt install devscripts equivs  --no-install-recommends --yes
