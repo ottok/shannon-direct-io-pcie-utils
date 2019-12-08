@@ -1,14 +1,19 @@
 # Vendor: Shannon Systems (Shanghai), 2012
 # Author: gaoyan@shannon-data.com
 #
-CC=gcc -m64 -no-pie
+PIC_FLAG_HOST=0
+CUSTOMUSE_FLAG=1
+CC=gcc -m64
+ifeq (${CUSTOMUSE_FLAG},1)
+para1=$(shell gcc -posix -E -dM - </dev/null |grep pic)
 
-# NOTE! On Ubuntu Trusty's GCC version this will yield
-#  gcc: error: unrecognized command line option ‘-no-pie’
-# but that does not matter as Ubuntu Trusty is no longer supported since April 2019.
+PIC_FLAG_CUSTOM=$(shell if [ ! "$(para1)" ]; then echo 0; else echo 1;fi)
+CFLAGS=$(shell if [ "$(PIC_FLAG_CUSTOM)" -gt "$(PIC_FLAG_HOST)" ]; then echo "-no-pie"; fi)
+CC+=$(CFLAGS)
+endif
 
 TARGETS=shannon-format shannon-beacon shannon-attach shannon-detach shannon-status shannon-firmwareupdate\
-	shannon-pool shannon-cps-op
+	shannon-pool shannon-cps-op shannon-phy-op
 TARGETS_DEBUG+=shannon-unload
 OBJFORMAT=format.o common.o
 OBJATTACH=attach.o common.o
@@ -20,6 +25,7 @@ OBJPOOL=pool.o common.o
 OBJREGSOP=regs-op.o common.o
 OBJCPSOP=cps-op.o common.o
 OBJUNLOAD=unload.o common.o
+OBJPHY=phy-op.o common.o
 
 .PHONY: all install clean uninstall
 
@@ -51,6 +57,9 @@ shannon-cps-op: $(OBJCPSOP)
 	$(CC) -o shannon-cps-op $(OBJCPSOP)
 shannon-unload: $(OBJUNLOAD)
 	$(CC) -o shannon-unload $(OBJUNLOAD)
+shannon-phy-op: $(OBJPHY)
+	$(CC) -o shannon-phy-op $(OBJPHY)
+
 
 install: $(TARGETS)
 	install -d $(DESTDIR)/usr/bin/ $(DESTDIR)/lib/udev/rules.d/
@@ -65,6 +74,10 @@ uninstall:
 	rm -rf $(DESTDIR)/usr/bin/shannon-attach
 	rm -rf $(DESTDIR)/usr/bin/shannon-detach
 	rm -rf $(DESTDIR)/usr/bin/shannon-status
+	rm -rf $(DESTDIR)/usr/bin/shannon-pool
+	rm -rf $(DESTDIR)/usr/bin/shannon-regs-op
+	rm -rf $(DESTDIR)/usr/bin/shannon-cps-op
+	rm -rf $(DESTDIR)/usr/bin/shannon-phy-op
 	rm -rf $(DESTDIR)/usr/bin/shannon-bugreport
 	rm -rf $(DESTDIR)/usr/bin/shannon-eject
 	rm -rf $(DESTDIR)/usr/bin/shannon-firmwareupdate
